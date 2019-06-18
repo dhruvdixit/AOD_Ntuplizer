@@ -7,6 +7,8 @@ root=root; exec $root -l -b -q "$0($(join_by \",\" \"$*\" | \
 
 #include <TROOT.h>
 #include <TSystem.h>
+#include </home/ddixit/alice/sw/ubuntu1604_x86-64/AliPhysics/master-1/PWGPP/PilotTrain/AddTaskCDBconnect.C>
+//#include "/home/ddixit/alice/sw/ubuntu1604_x86-64/AliPhysics/master-1/include/AliTaskCDBconnect.h"
 
 void runNTGJ(const char *config_filename = "config/lhc16c2_1run.yaml",
              const char *run_mode = "test")
@@ -14,6 +16,7 @@ void runNTGJ(const char *config_filename = "config/lhc16c2_1run.yaml",
     gROOT->ProcessLine(".include $ROOTSYS/include");
     gROOT->ProcessLine(".include $ALICE_ROOT/include");
     gROOT->ProcessLine(".include $ALICE_PHYSICS/include");
+    gROOT->ProcessLine(".include $ALICE_PHYSICS/PWGPP/PilotTrain/AddTaskCDBconnect.C");
 
     FILE *fp;
     char line[4096];
@@ -91,8 +94,10 @@ void runNTGJ(const char *config_filename = "config/lhc16c2_1run.yaml",
                 // symbolic "latest" should exist (note
                 // TString::ReplaceAll already modified the content)
                 include = "$ALICE_ROOT/../../" +
-                    ps(0, ps.Index("/")) + "/latest/include";
+                    ps(0, ps.Index("::")) + "/latest/include";
+                printf("%s\n", ps.Data());
             }
+            printf("%s\n", include.Data());
             gROOT->ProcessLine(".include " + include);
         }
     }
@@ -113,6 +118,18 @@ void runNTGJ(const char *config_filename = "config/lhc16c2_1run.yaml",
     gSystem->Load("libEMCALUtils");
     gSystem->Load("libPWGPPEMCAL");
 
+#if 1
+    if (gSystem->AccessPathName("libgmp.so") &&
+        !gSystem->AccessPathName("/usr/lib64/libgmp.so")) {
+        gSystem->Symlink("/usr/lib64/libgmp.so", "libgmp.so");
+    }
+    gSystem->Load("libgmp");
+    if (gSystem->AccessPathName("libmpfr.so") &&
+        !gSystem->AccessPathName("/usr/lib64/libmpfr.so")) {
+        gSystem->Symlink("/usr/lib64/libmpfr.so", "libmpfr.so");
+    }
+#endif
+    gSystem->Load("libmpfr");
     gSystem->Load("libCGAL");
     gSystem->Load("libfastjet");
     gSystem->Load("libsiscone");
@@ -124,11 +141,19 @@ void runNTGJ(const char *config_filename = "config/lhc16c2_1run.yaml",
 
     AliAnalysisManager *mgr = new AliAnalysisManager();
 
+    //gROOT->ProcessLine(".x $ALICE_ROOT/ANALYSIS/macros/train/"
+    //                   "AddESDHandler.C");
     gROOT->ProcessLine(".x $ALICE_ROOT/ANALYSIS/macros/train/"
-                       "AddESDHandler.C");
-    gROOT->ProcessLine(".x $ALICE_ROOT/ANALYSIS/macros/train/"
-                       "AddMCHandler.C");
+		       "AddAODHandler.C");
+    //gROOT->ProcessLine(".x $ALICE_ROOT/ANALYSIS/macros/train/"
+    //                   "AddMCHandler.C");
 
+
+    gROOT->ProcessLine(".x $ALICE_PHYSICS/PWGPP/PilotTrain/AddTaskCDBconnect.C")
+    AliTaskCDBconnect* taskCDB = AddTaskCDBconnect();
+    taskCDB->SetFallBackToRaw(kTRUE);
+
+      
     AliAnalysisAlien *plugin = new AliAnalysisAlien("pluginNTGJ");
 
     for (Int_t i = 0; i < package_list.GetSize(); i++) {
@@ -356,7 +381,8 @@ void runNTGJ(const char *config_filename = "config/lhc16c2_1run.yaml",
     plugin->SetAdditionalLibs(
         "AliAnalysisTaskNTGJ.h "
         "AliAnalysisTaskNTGJ.cxx "
-        "special_function.h mc_truth.h emcal.h isolation.h jet.h "
+        "special_function.h mc_truth.h "
+        "emcal_cell.h emcal.h isolation.h jet.h "
         "bad_channel.h "
         "eLut.cpp eLut.h half.cpp halfExport.h halfFunction.h "
         "half.h halfLimits.h toFloat.h "
@@ -366,6 +392,9 @@ void runNTGJ(const char *config_filename = "config/lhc16c2_1run.yaml",
         // Not sure if this helps against the missing pyqpar_ when
         // dlopen() "libAliPythia6.so"
         "libpythia6.so libAliPythia6.so "
+#if 1
+        "libgmp.so libmpfr.so libboost_thread.so "
+#endif
         "libCGAL.so libfastjet.so libsiscone.so "
         "libsiscone_spherical.so libfastjetplugins.so "
         "libfastjetcontribfragile.so " +

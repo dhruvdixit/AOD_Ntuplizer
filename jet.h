@@ -890,7 +890,7 @@ Delaunay_triangulation_caching_degeneracy_removal_policy_2<
 
 #define FILL_BRANCH_JET_TRUTH(s, jet_truth)                         \
     _branch_njet_truth_ ## s = 0;                                   \
-    if (mc_truth_event != NULL) {                                   \
+    if (mcArray) {                                                  \
         for (std::vector<fastjet::PseudoJet>::const_iterator        \
                  iterator_jet = jet_truth.begin();                  \
              iterator_jet != jet_truth.end(); iterator_jet++) {     \

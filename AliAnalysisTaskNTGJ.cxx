@@ -12,11 +12,15 @@
 #include <TSystem.h>
 #include <TGeoManager.h>
 #include <TGeoGlobalMagField.h>
+#include "TCanvas.h"
+#include "TParticle.h"
+#include "TH1I.h"
+#include <TDatabasePDG.h>
+
 
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Woverloaded-virtual"
 #include <AliVEvent.h>
-#include <AliAODEvent.h>
 #pragma GCC diagnostic pop
 #include <AliESDEvent.h>
 #include <AliESDHeader.h>
@@ -30,13 +34,19 @@
 #include <AliGenEventHeader.h>
 #include <AliGenPythiaEventHeader.h>
 #include <AliStack.h>
-#include <AliAODMCParticle.h>
 #include <AliESDMuonTrack.h>
 
 #include <AliMultSelection.h>
 #include <AliEventplane.h>
 
 #include <AliMagF.h>
+
+#include <AliAODEvent.h>
+#include <AliAODTrack.h>
+#include <AliAODVertex.h>
+#include <AliAODMCParticle.h>
+#include <AliAODTracklets.h>
+#include "AliAODMCHeader.h"
 
 #include "AliAnalysisTaskNTGJ.h"
 
@@ -409,6 +419,7 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
     if (esd_event == NULL) {
         aod_event = dynamic_cast<AliAODEvent *>(event);
         if (aod_event == NULL) {
+	  std::cout << "not AOD event" << __FILE__ << __LINE__ << std::endl;
             return;
         }
     }
@@ -430,10 +441,12 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
         aod_event->GetTriggerMaskNext50();
     _branch_has_misalignment_matrix = false;
 
-    if (_f1_ncluster_tpc_linear_pt_dep == NULL) {
+
+    if(esd_event != NULL){
+      if (_f1_ncluster_tpc_linear_pt_dep == NULL) {
         // PWG-JE cuts, see AddTrackCutsLHC10h() in
         // AliPhysics/PWGJE/macros/AddTaskESDFilterPWGJETrain.C
-
+	
         _f1_ncluster_tpc_linear_pt_dep =
             new TFormula("_f1_ncluster_tpc_linear_pt_dep",
                          "70.+30./20.*x");
@@ -522,7 +535,13 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
         _track_cut.back().SetMaxDCAToVertexZ(3.2);
         _track_cut.back().SetDCAToVertex2D(kTRUE);
         _track_cut.back().SetMaxChi2PerClusterITS(36);
+      }
     }
+    
+    //AOD track cuts
+    else if(aod_event != NULL){
+      }
+    
 
     AliVVZERO *v0 = event->GetVZEROData();
 
@@ -588,8 +607,44 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
 
     AliMCEvent *mc_truth_event = MCEvent();
 
+
+    //Getting the AOD MC info
+    TClonesArray* mcArray = dynamic_cast<TClonesArray*>(aod_event->FindListObject(AliAODMCParticle::StdBranchName()));
+    if (!mcArray) {
+      AliError("Could not find Monte-Carlo in AOD");
+      return;
+    }
+    AliAODMCHeader *mcHeader=NULL;
+
+    if(mcArray) {
+      mcHeader = dynamic_cast<AliAODMCHeader*>(aod_event->GetList()->FindObject(AliAODMCHeader::StdBranchName()));
+      if (!mcHeader) {
+	AliError("Could not find MC Header in AOD");
+	return;
+      }
+    }
+    
+    /*_branch_nmc_truth = 0;
+    
+    for (Int_t ipart=0; ipart<mcArray->GetEntriesFast(); ipart++) {
+
+      AliAODMCParticle* p = dynamic_cast<AliAODMCParticle*>(mcArray->At(ipart));
+      if (!p){
+	AliError("Failed casting particle from MC array!, Skipping particle");
+	continue;
+      }
+      _branch_mc_truth_e[_branch_nmc_truth] = half(p->E());
+      _branch_mc_truth_pt[_branch_nmc_truth] = half(p->Pt());
+      _branch_mc_truth_eta[_branch_nmc_truth] = half(p->Eta());
+      _branch_mc_truth_phi[_branch_nmc_truth] =  half(angular_range_reduce(p->Phi()));      
+      _branch_nmc_truth++;
+    }//*/
+    
+
+    mc_truth_event = NULL;
+    
     if (mc_truth_event != NULL) {
-        mc_truth_event->PreReadAll();
+      mc_truth_event->PreReadAll();
     }
 
     _branch_eg_signal_process_id = INT_MIN;
@@ -613,35 +668,61 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
 
     AliGenEventHeader *mc_truth_header = mc_truth_event != NULL ?
         mc_truth_event->GenEventHeader() : NULL;
-    AliGenPythiaEventHeader *mc_truth_pythia_header;
 
-    if (mc_truth_header != NULL) {
-        _branch_eg_weight = mc_truth_header->EventWeight();
-
-        TArrayF eg_primary_vertex(3);
-
-        mc_truth_header->PrimaryVertex(eg_primary_vertex);
-
-        for (Int_t i = 0; i < 3; i++) {
-            _branch_eg_primary_vertex[i] = eg_primary_vertex.At(i);
-        }
-        mc_truth_pythia_header =
-            dynamic_cast<AliGenPythiaEventHeader *>(mc_truth_header);
-        if (mc_truth_pythia_header != NULL) {
-            _branch_eg_signal_process_id =
-                mc_truth_pythia_header->ProcessType();
-            _branch_eg_mpi = mc_truth_pythia_header->GetNMPI();
-            _branch_eg_pt_hat =
-                mc_truth_pythia_header->GetPtHard();
-            _branch_eg_cross_section =
-                mc_truth_pythia_header->GetXsection();
-            // Count ntrial, because the event might get skimmed away
-            // by the ntuplizer
-            _skim_sum_eg_ntrial +=
-                mc_truth_pythia_header->Trials();
-        }
+    if (mcHeader != NULL) {
+      //_branch_eg_weight = mcHeader->EventWeight();
+      
+      TArrayF eg_primary_vertex(3);
+      Double_t eg_primary_vertex_doubleArray[3];
+      
+      mcHeader->GetVertex(eg_primary_vertex_doubleArray);
+      eg_primary_vertex[0] = eg_primary_vertex_doubleArray[0];
+      eg_primary_vertex[1] = eg_primary_vertex_doubleArray[1];
+      eg_primary_vertex[2] = eg_primary_vertex_doubleArray[2];
+      
+      for (Int_t i = 0; i < 3; i++) {
+	_branch_eg_primary_vertex[i] = eg_primary_vertex.At(i);
+      }
+      AliGenPythiaEventHeader *mc_truth_pythia_header = dynamic_cast<AliGenPythiaEventHeader *>(mcHeader);
+      
+      if (mc_truth_pythia_header == NULL) {
+	fprintf(stderr, "%s:%d:\n", __FILE__, __LINE__);
+	// Try extract this from "cocktail header" = header list
+	// for embedding
+	TList *header = mcHeader->GetCocktailHeaders();
+	// header->Print();
+	if (header != NULL) {
+	  TObject *entry = header->FindObject("Pythia8GammaJet_1");
+	  if (entry != NULL) {
+	    mc_truth_pythia_header =
+	      dynamic_cast<AliGenPythiaEventHeader *>
+	      (entry);
+	  }
+	}
+      }
+      mc_truth_pythia_header = NULL;
+      if (mc_truth_pythia_header != NULL) {
+	_branch_eg_signal_process_id =
+	  mc_truth_pythia_header->ProcessType();
+	_branch_eg_mpi = mc_truth_pythia_header->GetNMPI();
+	_branch_eg_pt_hat =
+	  mc_truth_pythia_header->GetPtHard();
+	_branch_eg_cross_section =
+	  mc_truth_pythia_header->GetXsection();
+	// Count ntrial, because the event might get skimmed away
+	// by the ntuplizer
+	_skim_sum_eg_ntrial +=
+	  mc_truth_pythia_header->Trials();
+      }
+      else
+	{
+	  _branch_eg_signal_process_id = mcHeader->GetEventType();
+	  _branch_eg_pt_hat = mcHeader->GetPtHard();
+	  _branch_eg_cross_section = mcHeader->GetCrossSection();
+	  _skim_sum_eg_ntrial += mcHeader->GetTrials();
+	}
     }
-
+    
     AliStack *stack;
 
     if (mc_truth_event != NULL) {
@@ -683,7 +764,11 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
     std::fill(_branch_primary_vertex_spd_sigma,
               _branch_primary_vertex_spd_sigma + 3, NAN);
     _branch_primary_vertex_spd_ncontributor = INT_MIN;
-
+    _branch_is_pileup_from_spd_3_08 = false;
+    _branch_is_pileup_from_spd_5_08 = false;
+    _branch_npileup_vertex_spd = INT_MIN;
+    _branch_ncluster_tpc = INT_MIN;
+ 
     const AliVVertex *primary_vertex_spd =
         event->GetPrimaryVertexSPD();
 
@@ -700,13 +785,7 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
             _branch_primary_vertex_spd_ncontributor =
                 esd_primary_vertex_spd->GetNContributors();
         }
-    }
-
-    _branch_is_pileup_from_spd_3_08 = false;
-    _branch_is_pileup_from_spd_5_08 = false;
-    _branch_npileup_vertex_spd = INT_MIN;
-    _branch_ncluster_tpc = INT_MIN;
-    if (esd_event != NULL) {
+	
         _branch_is_pileup_from_spd_3_08 =
             esd_event->IsPileupFromSPD(3, 0.8);
         _branch_is_pileup_from_spd_5_08 =
@@ -716,6 +795,27 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
         _branch_ncluster_tpc =
             esd_event->GetNumberOfTPCClusters();
     }
+    else if(aod_event != NULL){
+        const AliAODVertex *aod_primary_vertex_spd =
+            aod_event->GetPrimaryVertexSPD();
+
+        /*if (aod_primary_vertex_spd != NULL) {
+            aod_primary_vertex_spd->GetSigmaXYZ(
+                _branch_primary_vertex_spd_sigma);
+            _branch_primary_vertex_spd_ncontributor =
+                aod_primary_vertex_spd->GetNContributors();
+	 }//*/
+	
+        _branch_is_pileup_from_spd_3_08 =
+            aod_event->IsPileupFromSPD(3, 0.8);
+        _branch_is_pileup_from_spd_5_08 =
+            aod_event->IsPileupFromSPD(5, 0.8);
+        _branch_npileup_vertex_spd =
+            aod_event->GetNumberOfPileupVerticesSPD();
+        _branch_ncluster_tpc =
+            aod_event->GetNumberOfTPCClusters();
+    }
+
     _branch_event_selected = fInputHandler->IsEventSelected();
 
     if (_skim_multiplicity_tracklet_min_n > INT_MIN) {
@@ -864,62 +964,56 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
     std::vector<Int_t> reverse_stored_mc_truth_index;
     std::vector<Int_t> reverse_stored_parton_algorithmic_index;
 
-    if (mc_truth_event != NULL) {
-        stored_mc_truth_index.resize(
-            mc_truth_event->GetNumberOfTracks(), ULONG_MAX);
+    if (mcArray) {
+      stored_mc_truth_index.resize(mcArray->GetEntriesFast(), ULONG_MAX);
+      size_t nmc_truth = 0;
+      for (Int_t i = 0; i < mcArray->GetEntriesFast(); i++) {
+	// Bookkeeping for primary final state particles
+	//for time being final_state_primary(mc_event, i) alwasy returns true
+	if (final_state_primary(mc_truth_event, i)) {
+	  stored_mc_truth_index[i] = nmc_truth;
+	  reverse_stored_mc_truth_index.push_back(i);
+	  nmc_truth++;
+	}
+	
+	
+	// Bookkeeping for partons
+	if (parton_cms_algorithmic(mc_truth_event, i)) {
+	  reverse_stored_parton_algorithmic_index.push_back(i);
+	}
+      }
+      
 
-        size_t nmc_truth = 0;
-
-        for (Int_t i = 0;
-             i < mc_truth_event->GetNumberOfTracks(); i++) {
-            // Bookkeeping for primary final state particles
-            if (final_state_primary(mc_truth_event, i)) {
-                stored_mc_truth_index[i] = nmc_truth;
-                reverse_stored_mc_truth_index.push_back(i);
-                nmc_truth++;
-            }
-            // Bookkeeping for partons
-            if (parton_cms_algorithmic(mc_truth_event, i)) {
-                reverse_stored_parton_algorithmic_index.push_back(i);
-            }
-        }
-
-        // Assign secondaries to the primaries
-
-        for (Int_t i = 0;
-             i < mc_truth_event->GetNumberOfTracks(); i++) {
-            // Skip primaries
-            if (final_state_primary(mc_truth_event, i)) {
-                continue;
-            }
-
-            Int_t j = i;
-            bool has_physical_primary_ancestor = false;
-
-            // Ensure termination even if there is a loop
-            for (size_t k = 0; k < 1000; k++) {
-                const AliMCParticle *p =
-                    static_cast<AliMCParticle *>(
-                        mc_truth_event->GetTrack(j));
-
-                if (p == NULL || p->Particle() == NULL) {
-                    break;
-                }
-                j = p->Particle()->GetFirstMother();
-                if (!(j >= 0 &&
-                      j < mc_truth_event->GetNumberOfTracks())) {
-                    break;
-                }
-                if (final_state_primary(mc_truth_event, j)) {
-                    has_physical_primary_ancestor = true;
-                    break;
-                }
-            }
-            if (has_physical_primary_ancestor) {
-                stored_mc_truth_index[i] = stored_mc_truth_index[j];
-            }
-        }
+      // Assign secondaries to the primaries
+      /*for (Int_t i = 0; i < mcArray->GetEntriesFast(); i++) {
+	// Skip primaries
+	if (final_state_primary(mc_truth_event, i)) {
+	  continue;
+	}
+	Int_t j = i;
+	bool has_physical_primary_ancestor = false;
+	// Ensure termination even if there is a loop
+	for (size_t k = 0; k < 1000; k++) {
+	  const AliAODMCParticle *p = static_cast<AliAODMCParticle *>(mcArray->At(j));
+	  if (p == NULL || p->Particle() == NULL) {
+	    break;
+	  }
+	  j = p->Particle()->GetFirstMother();
+	  if (!(j >= 0 && j < mcArray->GetEntriesFast())) {
+	    break;
+	  }
+	  if (final_state_primary(mc_truth_event, j)) {
+	    has_physical_primary_ancestor = true;
+	    break;
+	  }
+	}
+	if (has_physical_primary_ancestor) {
+	  stored_mc_truth_index[i] = stored_mc_truth_index[j];
+	  }//	
+	  }//*/
     }
+    
+    
 
     std::vector<fastjet::PseudoJet> particle_reco_tpc;
     std::vector<fastjet::PseudoJet> particle_reco_its;
@@ -938,54 +1032,42 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
 
     _branch_ntrack = 0;
     if (esd_event != NULL) {
-        for (Int_t i = 0; i < esd_event->GetNumberOfTracks(); i++) {
-            AliESDtrack *t = esd_event->GetTrack(i);
+   }
+    else if (aod_event != NULL) {
+        for (Int_t i = 0; i < aod_event->GetNumberOfTracks(); i++) {
+	  AliAODTrack *t = (AliAODTrack*)aod_event->GetTrack(i);
 
             if (t == NULL) {
                 continue;
             }
 
-            // Apply PWG-JE cuts (track cuts 0 and 1)
+	    UInt_t _local_track_cut_bits = 0;  /*bits 1 and 2 are Standard hybrid track cuts for pp and pPb
+					    bits 3 and 4 are PbPb cuts
+					    bit 5 is ITS only cuts
+					   */
 
-            if (_track_cut[0].AcceptTrack(t) ||
-                _track_cut[1].AcceptTrack(t)) {
-                track_reco_index_tpc[i] = particle_reco_tpc.size();
-                reco_stored_track_index_tpc.push_back(_branch_ntrack);
-                particle_reco_tpc.push_back(fastjet::PseudoJet(
-                    t->Px(), t->Py(), t->Pz(), t->P()));
-                kahan_sum(_branch_met_tpc[0], met_tpc_kahan_error[0],
-                          t->Px());
-                kahan_sum(_branch_met_tpc[1], met_tpc_kahan_error[1],
-                          t->Py());
-            }
+	    if((t->GetFilterMap() & 16) != 0) {_local_track_cut_bits |= ((1 << 0) | (1 << 1));}
+	    if (_local_track_cut_bits & 3 != 0) {
+	      track_reco_index_tpc[i] = particle_reco_tpc.size();
+	      reco_stored_track_index_tpc.push_back(_branch_ntrack);
+	      particle_reco_tpc.push_back(fastjet::PseudoJet(t->Px(), t->Py(), t->Pz(), t->P()));
+	      kahan_sum(_branch_met_tpc[0], met_tpc_kahan_error[0], t->Px());
+	      kahan_sum(_branch_met_tpc[1], met_tpc_kahan_error[1], t->Py());
+	    }
 
-            // Apply ITS only cut (track cut 4)
 
-            if (_track_cut[4].AcceptTrack(t)) {
-                track_reco_index_its[i] = particle_reco_its.size();
-                reco_stored_track_index_its.push_back(_branch_ntrack);
-                particle_reco_its.push_back(fastjet::PseudoJet(
-                    t->Px(), t->Py(), t->Pz(), t->P()));
-                kahan_sum(_branch_met_its[0], met_its_kahan_error[0],
-                          t->Px());
-                kahan_sum(_branch_met_its[1], met_its_kahan_error[1],
-                          t->Py());
-            }
-
-            // Store tracks passing PWG-JE *or* "2015 PbPb" cuts
-
-            bool store_track = false;
-
-            for (std::vector<AliESDtrackCuts>::iterator iterator =
-                     _track_cut.begin();
-                 iterator != _track_cut.end(); iterator++) {
-                if (iterator->AcceptTrack(t)) {
-                    store_track = true;
-                    break;
-                }
-            }
-
-            if (store_track) {
+	    if((t->GetFilterMap() & 2) != 0) {_local_track_cut_bits |= (1 << 4);}
+	    if (_local_track_cut_bits & 16 != 0) {
+	      track_reco_index_its[i] = particle_reco_its.size();
+	      reco_stored_track_index_its.push_back(_branch_ntrack);
+	      particle_reco_its.push_back(fastjet::PseudoJet(t->Px(), t->Py(), t->Pz(), t->P()));
+	      kahan_sum(_branch_met_its[0], met_its_kahan_error[0], t->Px());
+	      kahan_sum(_branch_met_its[1], met_its_kahan_error[1], t->Py());
+	    }
+	    
+	    //_local_track_cut_bits = 1;
+	    
+            if (_local_track_cut_bits) {
                 _branch_track_e[_branch_ntrack] = half(t->E());
                 _branch_track_pt[_branch_ntrack] = half(t->Pt());
                 _branch_track_eta[_branch_ntrack] = half(t->Eta());
@@ -1007,19 +1089,7 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
                              std::max(static_cast<Short_t>(CHAR_MIN),
                                       t->Charge()));
 
-                // Shortened track quality bit mask. Here bit 0 and 1
-                // are the PWG-JE's bit 4 and 8. Test for
-                // ((track_quality[i] & 3) != 0), i being the track
-                // index, to get PWG-JE's "272" (= 1 << 4 | 1 << 8)
-                // cut. Test for ((track_quality[i] & 4) == 0) and
-                // ((track_quality[i] & 8) == 0) for the "2015 PbPb" cut
-                // with clusterCut = 0 and 1.
-
                 _branch_track_quality[_branch_ntrack] = 0U;
-                for (size_t j = 0; j < _track_cut.size(); j++) {
-                    _branch_track_quality[_branch_ntrack] |=
-                        _track_cut[j].AcceptTrack(t) ? 1U << j : 0;
-                }
 
                 _branch_track_tpc_dedx[_branch_ntrack] =
                     half(t->GetTPCsignal());
@@ -1030,32 +1100,21 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
 
                 _branch_track_tpc_length_active_zone
                     [_branch_ntrack] = NAN;
-                if (t->GetInnerParam() != NULL) {
+                /*if (t->GetInnerParam() != NULL) {
                     _branch_track_tpc_length_active_zone
                         [_branch_ntrack] =
                         half(t->GetLengthInActiveZone
                              (mode_inner_wall, dead_zone_width_cm,
                               max_z_cm, event->GetMagneticField()));
-                }
-                _branch_track_tpc_xrow[_branch_ntrack] =
-                    std::min(static_cast<Float_t>(UCHAR_MAX),
-                             std::max(0.0F, t->GetTPCCrossedRows()));
-                _branch_track_tpc_ncluster[_branch_ntrack] =
-                    std::min(UCHAR_MAX,
-                             std::max(0, t->GetNumberOfTPCClusters()));
-                _branch_track_tpc_ncluster_dedx[_branch_ntrack] =
-                    std::min(static_cast<UShort_t>(UCHAR_MAX),
-                             std::max(static_cast<UShort_t>(0),
-                                      t->GetTPCsignalN()));
-                _branch_track_tpc_ncluster_findable[_branch_ntrack] =
-                    std::min(static_cast<UShort_t>(UCHAR_MAX),
-                             std::max(static_cast<UShort_t>(0),
-                                      t->GetTPCNclsF()));
-                _branch_track_its_ncluster[_branch_ntrack] =
-                    t->GetNumberOfITSClusters();
-                _branch_track_its_chi_square[_branch_ntrack] =
-                    half(t->GetITSchi2());
-
+		}//*/
+                _branch_track_tpc_xrow[_branch_ntrack] = std::min(static_cast<Float_t>(UCHAR_MAX),std::max(0.0F, t->GetTPCCrossedRows()));
+		_branch_track_tpc_ncluster[_branch_ntrack] = std::min(static_cast<UShort_t>(UCHAR_MAX), std::max(static_cast<UShort_t>(0), t->GetTPCNcls()));
+		//_branch_track_tpc_ncluster[_branch_ntrack] = std::min(UCHAR_MAX, std::max(0, t->GetTPCNcls()));
+                _branch_track_tpc_ncluster_dedx[_branch_ntrack] = std::min(static_cast<UShort_t>(UCHAR_MAX), std::max(static_cast<UShort_t>(0), t->GetTPCsignalN()));
+                _branch_track_tpc_ncluster_findable[_branch_ntrack] = std::min(static_cast<UShort_t>(UCHAR_MAX), std::max(static_cast<UShort_t>(0), t->GetTPCNclsF()));
+                _branch_track_its_ncluster[_branch_ntrack] = t->GetITSNcls();
+                _branch_track_its_chi_square[_branch_ntrack] = half(t->GetITSchi2());
+		//*/
                 Double_t dz[2] = { NAN, NAN };
                 Double_t cov[3] = { NAN, NAN, NAN };
 
@@ -1093,16 +1152,14 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
             }
         }
     }
-    // FIXME: AOD not handled
 
     std::vector<point_2d_t> particle_reco_area_estimation_tpc;
 
-    for (std::vector<fastjet::PseudoJet>::const_iterator iterator =
-             particle_reco_tpc.begin();
-         iterator != particle_reco_tpc.end(); iterator++) {
-        particle_reco_area_estimation_tpc.push_back(
-            point_2d_t(iterator->pseudorapidity(),
-                       iterator->phi_std()));
+    for (std::vector<fastjet::PseudoJet>::const_iterator iterator = particle_reco_tpc.begin();
+	 iterator != particle_reco_tpc.end();
+	 iterator++) {
+        particle_reco_area_estimation_tpc.push_back(point_2d_t(iterator->pseudorapidity(),
+							       iterator->phi_std()));
     }
 
     std::vector<point_2d_t> particle_reco_area_estimation_its;
@@ -1261,16 +1318,16 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
 
     static const double scale_ghost = pow(2.0, -30.0);
 
-    if (mc_truth_event != NULL) {
+    if (mcArray) {
         double met_truth_kahan_error[2] = { 0, 0 };
 
         for (std::vector<Int_t>::const_iterator iterator =
                  reverse_stored_mc_truth_index.begin();
              iterator != reverse_stored_mc_truth_index.end();
              iterator++) {
-            const AliMCParticle *p =
-                static_cast<AliMCParticle *>(
-                    mc_truth_event->GetTrack(*iterator));
+            const AliAODMCParticle *p =
+                static_cast<AliAODMCParticle *>(
+                    mcArray->At(*iterator));
 
             if (p == NULL) {
                 // Keep consistent indexing, though this should never
@@ -1337,12 +1394,12 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
             _branch_mc_truth_pdg_code[_branch_nmc_truth] =
                 std::min(SHRT_MAX,
                          std::max(SHRT_MIN, p->PdgCode()));
-            _branch_mc_truth_status[_branch_nmc_truth] =
+            /*_branch_mc_truth_status[_branch_nmc_truth] =
                 std::min(static_cast<Int_t>(UCHAR_MAX),
                          std::max(0,
                                   mc_truth_event->
                                   Particle(*iterator)->
-                                  GetStatusCode()));
+                                  GetStatusCode()));//*/
             // _branch_mc_truth_final_state_primary[_branch_nmc_truth] =
             //     final_state_primary(mc_truth_event, *iterator);
             // _branch_mc_truth_first_parent[_branch_nmc_truth] =
@@ -1356,12 +1413,12 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
                          std::max(static_cast<Short_t>(0),
                                   p->GetGeneratorIndex()));
 
-            if (p->Particle()->GetFirstMother() >= 0 &&
+            /*if (p->Particle()->GetFirstMother() >= 0 &&
                 p->Particle()->GetFirstMother() <
-                mc_truth_event->GetNumberOfTracks()) {
-                const AliMCParticle *pp =
-                    static_cast<AliMCParticle *>(
-                        mc_truth_event->GetTrack(
+                mcArray->GetEntriesFast()) {
+                const AliAODMCParticle *pp =
+                    static_cast<AliAODMCParticle *>(
+                        mcArray->At(
                             p->Particle()->GetFirstMother()));
 
                 _branch_mc_truth_first_parent_pdg_code
@@ -1382,19 +1439,17 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
                     pp->Particle()->GetLastDaughter() ?
                     pp->Particle()->GetFirstDaughter() :
                     USHRT_MAX;
-            }
+            }//*/
 
-            _branch_nmc_truth++;
+	    _branch_nmc_truth++;
             if (_branch_nmc_truth >= NMC_TRUTH_MAX) {
                 break;
             }
         }
 
-        cluster_sequence_truth = new fastjet::ClusterSequenceArea(
-            particle_truth,
-            fastjet::JetDefinition(fastjet::JetDefinition(
-                fastjet::antikt_algorithm, jet_antikt_d_04)),
-            fastjet::VoronoiAreaSpec());
+        cluster_sequence_truth = new fastjet::ClusterSequenceArea(particle_truth,
+								  fastjet::JetDefinition(fastjet::JetDefinition(fastjet::antikt_algorithm, jet_antikt_d_04)),
+								  fastjet::VoronoiAreaSpec());
         jet_truth_ak04 = cluster_sequence_truth->inclusive_jets(0);
     }
 
@@ -1445,13 +1500,10 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
     }
 
     const fastjet::ClusterSequenceArea
-        cluster_sequence_reco_ak04tpc(
-            particle_reco_tpc,
-            fastjet::JetDefinition(fastjet::JetDefinition(
-                fastjet::antikt_algorithm, jet_antikt_d_04)),
-            fastjet::VoronoiAreaSpec());
-    const std::vector<fastjet::PseudoJet> jet_reco_ak04tpc =
-        cluster_sequence_reco_ak04tpc.inclusive_jets(0);
+      cluster_sequence_reco_ak04tpc(particle_reco_tpc,
+				    fastjet::JetDefinition(fastjet::JetDefinition(fastjet::antikt_algorithm, jet_antikt_d_04)),
+				    fastjet::VoronoiAreaSpec());
+    const std::vector<fastjet::PseudoJet> jet_reco_ak04tpc = cluster_sequence_reco_ak04tpc.inclusive_jets(0);
 
     const fastjet::ClusterSequenceArea
         cluster_sequence_reco_tagged_ak04tpc(
@@ -1691,8 +1743,8 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
             // Test (above) and insertion must be done via
             // stored_mc_truth_index[], since mc_truth_index are
             // potentially secondaries
-            cluster_mc_truth_index.insert(
-                stored_mc_truth_index[mc_truth_index]);
+            //cluster_mc_truth_index.insert(
+	    //stored_mc_truth_index[mc_truth_index]);
         }
         std::sort(mc_truth_energy_index.begin(),
                   mc_truth_energy_index.end());
@@ -1714,7 +1766,7 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
             cluster_nmctruth_index++;
         }
 
-        if (esd_event != NULL) {
+        if (aod_event != NULL) {
             double cluster_iso_tpc_01 = 0;
             double cluster_iso_tpc_02 = 0;
             double cluster_iso_tpc_03 = 0;
@@ -1749,112 +1801,118 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
             std::vector<std::pair<double, double> >
                 delta_vs_iso_its_with_ue;
 
-            for (Int_t j = 0; j < esd_event->GetNumberOfTracks(); j++) {
-                AliESDtrack *t = esd_event->GetTrack(j);
+            for (Int_t j = 0; j < aod_event->GetNumberOfTracks(); j++) {
+	      AliAODTrack *t = (AliAODTrack*)aod_event->GetTrack(j);
 
                 if (t == NULL) {
                     continue;
                 }
 
                 // Apply PWG-JE cuts (track cuts 0 and 1)
+		UInt_t _local_track_cut_bits = 0;  /*bits 1 and 2 are Standard hybrid track cuts for pp and pPb
+					    bits 3 and 4 are PbPb cuts
+					    bit 5 is ITS only cuts
+					   */
 
-                if (_track_cut[0].AcceptTrack(t) ||
-                    _track_cut[1].AcceptTrack(t)) {
-                    const double dpseudorapidity = t->Eta() - p.Eta();
-                    const double dazimuth = angular_range_reduce(
-                        angular_range_reduce(t->Phi()) -
-                        angular_range_reduce(p.Phi()));
-                    const double dr_2 =
-                        std::pow(dpseudorapidity, 2) +
-                        std::pow(dazimuth, 2);
-                    const double ue =
-                        dr_2 < 0.4 * 0.4 ?
-                        track_reco_index_tpc.find(j) !=
-                        track_reco_index_tpc.end() ?
-                        evaluate_ue(ue_estimate_tpc.first, t->Eta(),
-                                    t->Phi()) *
-                        particle_reco_area_tpc
-                        [track_reco_index_tpc[j]] :
-                        0 : NAN;
-                    const double track_pt_minus_ue =
-                        dr_2 < 0.4 * 0.4 ?
-                        track_reco_index_tpc.find(j) !=
-                        track_reco_index_tpc.end() ?
-                        t->Pt() - ue :
-                        0 : NAN;
-
-                    if (dr_2 < 0.1 * 0.1) {
-                        cluster_iso_tpc_01 += track_pt_minus_ue;
-                        cluster_iso_tpc_01_ue += ue;
-                    }
-                    if (dr_2 < 0.2 * 0.2) {
-                        cluster_iso_tpc_02 += track_pt_minus_ue;
+		if((t->GetFilterMap() & 16) != 0) {
+		  _local_track_cut_bits |= ((1 << 0) | (1 << 1));
+		  
+		  const double dpseudorapidity = t->Eta() - p.Eta();
+		  const double dazimuth = angular_range_reduce(
+							       angular_range_reduce(t->Phi()) -
+							       angular_range_reduce(p.Phi()));
+		  const double dr_2 =
+		    std::pow(dpseudorapidity, 2) +
+		    std::pow(dazimuth, 2);
+		  const double ue =
+		    dr_2 < 0.4 * 0.4 ?
+			   track_reco_index_tpc.find(j) !=
+			   track_reco_index_tpc.end() ?
+			   evaluate_ue(ue_estimate_tpc.first, t->Eta(),
+				       t->Phi()) *
+		    particle_reco_area_tpc
+		    [track_reco_index_tpc[j]] :
+		    0 : NAN;
+		  const double track_pt_minus_ue =
+		    dr_2 < 0.4 * 0.4 ?
+			   track_reco_index_tpc.find(j) !=
+			   track_reco_index_tpc.end() ?
+			   t->Pt() - ue :
+		    0 : NAN;
+		  
+		  if (dr_2 < 0.1 * 0.1) {
+		    cluster_iso_tpc_01 += track_pt_minus_ue;
+		    cluster_iso_tpc_01_ue += ue;
+		  }
+		  if (dr_2 < 0.2 * 0.2) {
+		    cluster_iso_tpc_02 += track_pt_minus_ue;
                         cluster_iso_tpc_02_ue += ue;
-                    }
-                    if (dr_2 < 0.3 * 0.3) {
-                        cluster_iso_tpc_03 += track_pt_minus_ue;
-                        cluster_iso_tpc_03_ue += ue;
-                    }
-                    if (dr_2 < 0.4 * 0.4) {
-                        cluster_iso_tpc_04 += track_pt_minus_ue;
-                        cluster_iso_tpc_04_ue += ue;
-                        delta_vs_iso_tpc.push_back(
-                            std::pair<double, double>(
-                                sqrt(dr_2), track_pt_minus_ue));
-                        delta_vs_iso_tpc_with_ue.push_back(
-                            std::pair<double, double>(
-                                sqrt(dr_2), track_pt_minus_ue + ue));
-                    }
-                }
-                if (_track_cut[4].AcceptTrack(t)) {
-                    const double dpseudorapidity = t->Eta() - p.Eta();
-                    const double dazimuth = angular_range_reduce(
-                        angular_range_reduce(t->Phi()) -
-                        angular_range_reduce(p.Phi()));
-                    const double dr_2 =
-                        std::pow(dpseudorapidity, 2) +
-                        std::pow(dazimuth, 2);
-                    const double ue =
-                        dr_2 < 0.4 * 0.4 ?
-                        track_reco_index_its.find(j) !=
-                        track_reco_index_its.end() ?
-                        evaluate_ue(ue_estimate_its.first, t->Eta(),
-                                    t->Phi()) *
-                        particle_reco_area_its
-                        [track_reco_index_its[j]] :
-                        0 : NAN;
-                    const double track_pt_minus_ue =
-                        dr_2 < 0.4 * 0.4 ?
-                        track_reco_index_its.find(j) !=
-                        track_reco_index_its.end() ?
-                        t->Pt() - ue :
-                        0 : NAN;
+		  }
+		  if (dr_2 < 0.3 * 0.3) {
+		    cluster_iso_tpc_03 += track_pt_minus_ue;
+		    cluster_iso_tpc_03_ue += ue;
+		  }
+		  if (dr_2 < 0.4 * 0.4) {
+		    cluster_iso_tpc_04 += track_pt_minus_ue;
+		    cluster_iso_tpc_04_ue += ue;
+		    delta_vs_iso_tpc.push_back(
+					       std::pair<double, double>(
+									 sqrt(dr_2), track_pt_minus_ue));
+		    delta_vs_iso_tpc_with_ue.push_back(
+						       std::pair<double, double>(
+										 sqrt(dr_2), track_pt_minus_ue + ue));
+		  }
 
-                    if (dr_2 < 0.1 * 0.1) {
-                        cluster_iso_its_01 += track_pt_minus_ue;
-                        cluster_iso_its_01_ue += ue;
-                    }
-                    if (dr_2 < 0.2 * 0.2) {
-                        cluster_iso_its_02 += track_pt_minus_ue;
-                        cluster_iso_its_02_ue += ue;
-                    }
-                    if (dr_2 < 0.3 * 0.3) {
-                        cluster_iso_its_03 += track_pt_minus_ue;
-                        cluster_iso_its_03_ue += ue;
-                    }
-                    if (dr_2 < 0.4 * 0.4) {
-                        cluster_iso_its_04 += track_pt_minus_ue;
-                        cluster_iso_its_04_ue += ue;
-                        delta_vs_iso_its.push_back(
-                            std::pair<double, double>(
-                                sqrt(dr_2), track_pt_minus_ue));
-                        delta_vs_iso_its_with_ue.push_back(
-                            std::pair<double, double>(
-                                sqrt(dr_2), track_pt_minus_ue + ue));
-                    }
+                }
+		if((t->GetFilterMap() & 16) != 0) {
+		  const double dpseudorapidity = t->Eta() - p.Eta();
+		  const double dazimuth = angular_range_reduce(
+							       angular_range_reduce(t->Phi()) -
+							       angular_range_reduce(p.Phi()));
+		  const double dr_2 =
+		    std::pow(dpseudorapidity, 2) +
+		    std::pow(dazimuth, 2);
+		  const double ue =
+		    dr_2 < 0.4 * 0.4 ?
+			   track_reco_index_its.find(j) !=
+			   track_reco_index_its.end() ?
+			   evaluate_ue(ue_estimate_its.first, t->Eta(),
+				       t->Phi()) *
+		    particle_reco_area_its
+		    [track_reco_index_its[j]] :
+		    0 : NAN;
+		  const double track_pt_minus_ue =
+		    dr_2 < 0.4 * 0.4 ?
+			   track_reco_index_its.find(j) !=
+			   track_reco_index_its.end() ?
+			   t->Pt() - ue :
+		    0 : NAN;
+		  
+		  if (dr_2 < 0.1 * 0.1) {
+		    cluster_iso_its_01 += track_pt_minus_ue;
+		    cluster_iso_its_01_ue += ue;
+		  }
+		  if (dr_2 < 0.2 * 0.2) {
+		    cluster_iso_its_02 += track_pt_minus_ue;
+		    cluster_iso_its_02_ue += ue;
+		  }
+		  if (dr_2 < 0.3 * 0.3) {
+		    cluster_iso_its_03 += track_pt_minus_ue;
+		    cluster_iso_its_03_ue += ue;
+		  }
+		  if (dr_2 < 0.4 * 0.4) {
+		    cluster_iso_its_04 += track_pt_minus_ue;
+		    cluster_iso_its_04_ue += ue;
+		    delta_vs_iso_its.push_back(
+					       std::pair<double, double>(
+									 sqrt(dr_2), track_pt_minus_ue));
+		    delta_vs_iso_its_with_ue.push_back(
+						       std::pair<double, double>(
+										 sqrt(dr_2), track_pt_minus_ue + ue));
+		  }
                 }
             }
-
+	    
             for (Int_t j = 0; j < calo_cluster.GetEntriesFast(); j++) {
                 if (!cell_pass_basic_quality[j]) {
                     continue;
@@ -2075,7 +2133,7 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
                 [_branch_ncluster] = NAN;
         }
 
-        if (mc_truth_event != NULL) {
+        if (mcArray != NULL) {
             double cluster_iso_01_truth = 0;
             double cluster_iso_02_truth = 0;
             double cluster_iso_03_truth = 0;
@@ -2084,13 +2142,13 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
             std::vector<std::pair<double, double> > delta_vs_iso;
 
             for (Int_t j = 0;
-                 j < mc_truth_event->GetNumberOfTracks(); j++) {
+                 j < mcArray->GetEntriesFast(); j++) {
                 if (final_state_primary(mc_truth_event, j) &&
                     cluster_mc_truth_index.find(j) ==
                     cluster_mc_truth_index.end()) {
-                    const AliMCParticle *t =
-                        static_cast<AliMCParticle *>(
-                            mc_truth_event->GetTrack(j));
+                    const AliAODMCParticle *t =
+                        static_cast<AliAODMCParticle *>(
+                            mcArray->At(j));
 		    
 		    if(t->Charge()==0) continue; //leave only charged particles in jet truth definition
 
