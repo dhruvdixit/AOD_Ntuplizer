@@ -50,6 +50,7 @@ private:
     BRANCH_ARRAY(beam_particle, 2, I)                               \
     BRANCH(ntrigger_class, b)                                       \
     BRANCH_STR_ARRAY(trigger_class, ntrigger_class)                 \
+    //BRANCH_STR_ARRAY(cocktail_name, ntrigger_class)		    \
     BRANCH(run_number, I)                                           \
     BRANCH(period_number, i)                                        \
     BRANCH(orbit_number, i)                                         \
