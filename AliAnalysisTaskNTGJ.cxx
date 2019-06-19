@@ -683,13 +683,10 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
 	_branch_eg_primary_vertex[i] = eg_primary_vertex.At(i);
       }
       Int_t nGenerators = mcHeader->GetNCocktailHeaders();
-      //_branch_cocktail_name.clear();
       for(Int_t igen = 0; igen < nGenerators; igen++){
 	AliGenEventHeader *eventHeaderGen = mcHeader->GetCocktailHeader(igen); 
 	TString name = eventHeaderGen->GetName();
-	//_branch_cocktail_name.push_back(std::string(name.Data()));
-	//if(name.CompareTo("AliGenPythiaEventHeader")==0){
-	//if(name.Contains("Pythia8JetsGammaTrg")){
+	
 	if(name.CompareTo("Pythia")==0){//This line works!!!
 	  
 	  AliGenPythiaEventHeader* mc_truth_pythia_header = dynamic_cast<AliGenPythiaEventHeader*>(eventHeaderGen);
@@ -705,47 +702,7 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
 	  _skim_sum_eg_ntrial +=
 	    mc_truth_pythia_header->Trials();
 	}
-      }
-      
-      
-      /*AliGenPythiaEventHeader *mc_truth_pythia_header = dynamic_cast<AliGenPythiaEventHeader *>(mcHeader);
-      
-      if (mc_truth_pythia_header == NULL) {
-	fprintf(stderr, "%s:%d:\n", __FILE__, __LINE__);
-	// Try extract this from "cocktail header" = header list
-	// for embedding
-	TList *header = mcHeader->GetCocktailHeaders();
-	// header->Print();
-	if (header != NULL) {
-	  TObject *entry = header->FindObject("Pythia8JetsGammaTrg_1");
-	  if (entry != NULL) {
-	    mc_truth_pythia_header =
-	      dynamic_cast<AliGenPythiaEventHeader *>
-	      (entry);
-	  }
-	}
-      }
-      //mc_truth_pythia_header = NULL;
-      if (mc_truth_pythia_header != NULL) {
-	_branch_eg_signal_process_id =
-	  mc_truth_pythia_header->ProcessType();
-	_branch_eg_mpi = mc_truth_pythia_header->GetNMPI();
-	_branch_eg_pt_hat =
-	  mc_truth_pythia_header->GetPtHard();
-	_branch_eg_cross_section =
-	  mc_truth_pythia_header->GetXsection();
-	// Count ntrial, because the event might get skimmed away
-	// by the ntuplizer
-	_skim_sum_eg_ntrial +=
-	  mc_truth_pythia_header->Trials();
-      }
-      /*else
-	{
-	  _branch_eg_signal_process_id = mcHeader->GetEventType();
-	  _branch_eg_pt_hat = mcHeader->GetPtHard();
-	  _branch_eg_cross_section = mcHeader->GetCrossSection();
-	  _skim_sum_eg_ntrial += mcHeader->GetTrials();
-	}//*/
+      }//*/
     }
     
     AliStack *stack;
