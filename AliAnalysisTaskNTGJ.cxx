@@ -1071,8 +1071,8 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
                              std::max(static_cast<Short_t>(CHAR_MIN),
                                       t->Charge()));
 
-                _branch_track_quality[_branch_ntrack] = 0U;
-
+		_branch_track_quality[_branch_ntrack] = _local_track_cut_bits; 
+		
                 _branch_track_tpc_dedx[_branch_ntrack] =
                     half(t->GetTPCsignal());
 
