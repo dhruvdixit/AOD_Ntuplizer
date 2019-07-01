@@ -1037,8 +1037,41 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
 	      kahan_sum(_branch_met_tpc[1], met_tpc_kahan_error[1], t->Py());
 	    }
 
+	    ULong64_t allowITSTracking = 0;
+	    ULong64_t allITSCutsPassed = 0;
+	    
+	    //dca cuts
+	    Double_t dz_cuts[2] = { NAN, NAN };
+	    Double_t cov_cuts[3] = { NAN, NAN, NAN };
+	    if (t->PropagateToDCA
+		(primary_vertex, event->GetMagneticField(),
+		 kVeryBig, dz_cuts, cov_cuts) == kTRUE) {
+	      Double_t track_dca_xy_cuts =half(dz_cuts[0]);
+	      Double_t track_dca_z_cuts = half(dz_cuts[1]);
+	      if(track_dca_xy_cuts < 2.4) allowITSTracking |= (1 << 0);
+	      allITSCutsPassed |= (1 << 0);
+	      if(track_dca_z_cuts < 3.2) allowITSTracking |= (1 << 1);
+	      allITSCutsPassed |= (1 << 1);
+	    }
+	    
+	    //its cluster and chi2 cuts
+	    Int_t its_clusters_cuts = t->GetITSNcls();
+	    if(its_clusters_cuts >= 4) allowITSTracking |= (1 << 2);
+	    allITSCutsPassed |= (1 << 2);
+	    Double_t its_chi2_cuts = half(t->GetITSchi2());
+	    if((its_chi2_cuts/(Double_t)its_clusters_cuts) < 36.) allowITSTracking |= (1 << 3);
+	    allITSCutsPassed |= (1 << 3);
+	    
+	    //pt cut
+	    if((half(t->Pt()) > 0.15) && ((half(t->Pt()) < 1e+15)))allowITSTracking |= (1 << 4);
+	    allITSCutsPassed |= (1 << 4);
+	    
+	    //SetRequireITSStandAlone(kTRUE) cut
+	    if(( t->GetFilterMap() & 2) != 0)allowITSTracking |= (1 << 5);
+	    allITSCutsPassed |= (1 << 5);
+	
+	    if(allowITSTracking == allITSCutsPassed) {_local_track_cut_bits |= (1 << 4);}
 
-	    if((t->GetFilterMap() & 2) != 0) {_local_track_cut_bits |= (1 << 4);}
 	    if (_local_track_cut_bits & 16 != 0) {
 	      track_reco_index_its[i] = particle_reco_its.size();
 	      reco_stored_track_index_its.push_back(_branch_ntrack);
@@ -1846,7 +1879,41 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
 		  }
 
                 }
-		if((t->GetFilterMap() & 16) != 0) {
+
+		ULong64_t allowITSTracking = 0;
+		ULong64_t allITSCutsPassed = 0;
+
+		//dca cuts
+		Double_t dz_cuts[2] = { NAN, NAN };
+		Double_t cov_cuts[3] = { NAN, NAN, NAN };
+		if (t->PropagateToDCA
+		    (primary_vertex, event->GetMagneticField(),
+		     kVeryBig, dz_cuts, cov_cuts) == kTRUE) {
+		  Double_t track_dca_xy_cuts =half(dz_cuts[0]);
+		  Double_t track_dca_z_cuts = half(dz_cuts[1]);
+		  if(track_dca_xy_cuts < 2.4) allowITSTracking |= (1 << 0);
+		  allITSCutsPassed |= (1 << 0);
+		  if(track_dca_z_cuts < 3.2) allowITSTracking |= (1 << 1);
+		  allITSCutsPassed |= (1 << 1);
+		}
+
+		//its cluster and chi2 cuts
+		Int_t its_clusters_cuts = t->GetITSNcls();
+		if(its_clusters_cuts >= 4) allowITSTracking |= (1 << 2);
+		allITSCutsPassed |= (1 << 2);
+		Double_t its_chi2_cuts = half(t->GetITSchi2());
+		if((its_chi2_cuts/(Double_t)its_clusters_cuts) < 36.) allowITSTracking |= (1 << 3);
+		allITSCutsPassed |= (1 << 3);
+
+		//pt cut
+		if((half(t->Pt()) > 0.15) && ((half(t->Pt()) < 1e+15)))allowITSTracking |= (1 << 4);
+		allITSCutsPassed |= (1 << 4);
+
+		//SetRequireITSStandAlone(kTRUE) cut
+		if(( t->GetFilterMap() & 2) != 0)allowITSTracking |= (1 << 5);
+	        allITSCutsPassed |= (1 << 5);
+		
+		if(allowITSTracking == allITSCutsPassed) {
 		  const double dpseudorapidity = t->Eta() - p.Eta();
 		  const double dazimuth = angular_range_reduce(
 							       angular_range_reduce(t->Phi()) -
