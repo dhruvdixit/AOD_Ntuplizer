@@ -387,6 +387,7 @@ void runNTGJ(const char *config_filename = "config/lhc16c2_1run.yaml",
         "eLut.cpp eLut.h half.cpp halfExport.h halfFunction.h "
         "half.h halfLimits.h toFloat.h "
         "keras_model.h keras_model.cc "
+        "track_cuts.h "
         // "blasdrv.h efp7.cc einstein_sum.h "
         "photon_discr.model "
         // Not sure if this helps against the missing pyqpar_ when
