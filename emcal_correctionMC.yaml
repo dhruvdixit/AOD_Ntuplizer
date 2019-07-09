@@ -7,13 +7,13 @@ inputObjects:
         defaultClusterContainer:
             branchName: "usedefault"
 CellEnergy:
-    enabled: false
+    enabled: true
     createHistos: true
 CellBadChannel:
     enabled: true
     createHistos: true
 CellTimeCalib:
-    enabled: false
+    enabled: true
     createHistos: true
 Clusterizer:
     enabled: true
@@ -28,10 +28,10 @@ Clusterizer:
     w0: 4.5
 
 ClusterTrackMatcher:
-    enabled: false
+    enabled: true
     createHistos: true
 
 CellEmulateCrosstalk:
-    enabled: false
-    createHistos: false
+    enabled: true
+    createHistos: true
     inducedTCardMinimum: 0.1
