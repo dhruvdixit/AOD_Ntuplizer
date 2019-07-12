@@ -1029,7 +1029,7 @@ void AliAnalysisTaskNTGJ::UserExec(Option_t *option)
              bit 5 is ITS only cuts
             */
             UInt_t _local_track_cut_bits = get_local_track_cut_bits(t, event);
-            if (_local_track_cut_bits != 0) {
+            if (_local_track_cut_bits == 0) {
                 continue;
             }
 
